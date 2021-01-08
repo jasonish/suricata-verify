@@ -46,16 +46,11 @@ WIN32 = sys.platform == "win32"
 suricata_bin = "src\suricata.exe" if WIN32 else "./src/suricata"
 suricata_yaml = "suricata.yaml" if WIN32 else "./suricata.yaml"
 
-manager = mp.Manager()
-lock = mp.Lock()
-failedLogs = manager.list()
-count_dict = manager.dict()
-check_args = manager.dict()
-
-count_dict['passed'] = 0
-count_dict['failed'] = 0
-count_dict['skipped'] = 0
-check_args['fail'] = 0
+manager = None
+lock = None
+failedLogs = None
+count_dict = None
+check_args = None
 
 class SelfTest(unittest.TestCase):
 
@@ -871,9 +866,25 @@ def run_test(dirpath, args, cwd, suricata_config):
 def main():
     global TOPDIR
     global args
+    global manager
+    global lock
+    global failedLogs
+    global count_dict
+    global check_args
 
     if not check_deps():
         return 1
+
+    manager = mp.Manager()
+    lock = mp.Lock()
+    failedLogs = manager.list()
+    count_dict = manager.dict()
+    check_args = manager.dict()
+
+    count_dict['passed'] = 0
+    count_dict['failed'] = 0
+    count_dict['skipped'] = 0
+    check_args['fail'] = 0
 
     parser = argparse.ArgumentParser(description="Verification test runner.")
     parser.add_argument("-v", dest="verbose", action="store_true")
@@ -975,7 +986,9 @@ def main():
     try:
         for dirpath in tests:
             pool.apply_async(run_test, args=(dirpath, args, cwd, suricata_config))
-    except TerminatePoolError:
+    except TerminatePoolError as err:
+        print("Got terminate pool error")
+        print(err)
         pool.terminate()
 
     pool.close()
