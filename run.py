@@ -585,8 +585,15 @@ class TestRunner:
         self.output = outdir
         self.quiet = quiet
 
-        # The name is just the directory name.
-        self.name = os.path.basename(self.directory)
+        # Create test name. This is the path following "tests/", or if
+        # "tests/" could not be found, such as when running some
+        # private directory, use the full path.
+        prefix = "tests{}".format(os.path.sep)
+        test_name_offset = directory.find(prefix)
+        if test_name_offset > -1:
+            self.name = self.directory[test_name_offset + len(prefix):]
+        else:
+            self.name = self.directory
 
         # List of thread readers.
         self.readers = []
@@ -793,16 +800,10 @@ class TestRunner:
 
             if not check_value["failure"] and not check_value["skipped"]:
                 if not self.quiet:
-                    prefix = "tests{}".format(os.path.sep)
-                    test_name_offset = self.directory.find(prefix)
-                    if test_name_offset > -1:
-                        path_name = self.directory[test_name_offset + len(prefix):]
-                    else:
-                        path_name = self.directory
-                    print("===> %s: OK%s" % (path_name, " (%dx)" % count if count > 1 else ""))
+                    print("===> %s: OK%s" % (self.name, " (%dx)" % count if count > 1 else ""))
             elif not check_value["failure"]:
                 if not self.quiet:
-                    print("===> {}: OK (checks: {}, skipped: {})".format(os.path.basename(self.directory), sum(check_value.values()), check_value["skipped"]))
+                    print("===> {}: OK (checks: {}, skipped: {})".format(self.name, sum(check_value.values()), check_value["skipped"]))
             return check_value
 
     def pre_check(self):
