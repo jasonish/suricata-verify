@@ -793,11 +793,12 @@ class TestRunner:
 
             if not check_value["failure"] and not check_value["skipped"]:
                 if not self.quiet:
-                    test_name_offset = self.directory.find("tests/")
+                    prefix = "tests{}".format(os.path.sep)
+                    test_name_offset = self.directory.find(prefix)
                     if test_name_offset > -1:
-                        path_name = self.directory[test_name_offset + len("tests/"):]
+                        path_name = self.directory[test_name_offset + len(prefix):]
                     else:
-                        path_name = os.path.basename(self.directory)
+                        path_name = self.directory
                     print("===> %s: OK%s" % (path_name, " (%dx)" % count if count > 1 else ""))
             elif not check_value["failure"]:
                 if not self.quiet:
