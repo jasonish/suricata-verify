@@ -114,6 +114,10 @@ pre-check: |
 # "pcap: false" in the requires section.
 pcap: input.pcap
 
+# Profile a rule files to use. If not present, and a single rule file exists it will 
+# be used.
+rules: test.rules
+
 # Test for a specific exit code. By default a test will fail if the
 # exit code is anything other than 0, however sometimes we may be
 # testing for failure.

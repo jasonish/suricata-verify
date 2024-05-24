@@ -937,7 +937,10 @@ class TestRunner:
                 args += ["-r", pcaps[0]]
 
         # Find rules.
-        rules = glob.glob(os.path.join(self.directory, "*.rules"))
+        if "rules" in self.config:
+            rules = [self.config["rules"]]
+        else:
+            rules = glob.glob(os.path.join(self.directory, "*.rules"))
         if not rules:
             args.append("--disable-detection")
         elif len(rules) == 1:
