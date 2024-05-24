@@ -1,0 +1,39 @@
+requires:
+  min-version: 8
+
+args:
+  - --set default-rule-path=${TEST_DIR}
+  - --set security.lua.allow-rules=true
+  - --set logging.outputs.1.file.type=json
+
+profiles:
+  - "io.open"
+  - "pcall"
+
+io.open:
+  rules: "ioopen.rules"
+  checks:
+    - filter:
+        filename: suricata.log
+        count: 1
+        match:
+          engine.message.__startswith: "Lua script failed to run successfully"
+          engine.message.__endswith: "attempt to index a nil value (global 'io')"
+    - filter:
+        count: 0
+        match:
+          event_type: alert
+
+pcall:
+  rules: "pcall.rules"
+  checks:
+    - filter:
+        filename: suricata.log
+        count: 1
+        match:
+          engine.message.__startswith: "Lua script failed to run successfully"
+          engine.message.__endswith: "Blocked Lua function called: (null).pcall"
+    - filter:
+        count: 0
+        match:
+          event_type: alert
