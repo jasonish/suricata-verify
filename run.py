@@ -597,19 +597,33 @@ class TestRunner:
 
         # Load the test configuration.
         self.config = None
+        self.profiles = {}
         self.load_config()
 
         self.suricata_config.load_config(self.get_suricata_yaml_path())
 
     def load_config(self):
+        config = {}
         if os.path.exists(os.path.join(self.directory, "test.yaml")):
             try:
-                self.config = yaml.safe_load(
+                config = yaml.safe_load(
                     open(os.path.join(self.directory, "test.yaml"), "rb"))
             except yaml.scanner.ScannerError as e:
                 print(str(e))
-        if self.config is None:
-            self.config = {}
+
+        profiles = {}
+
+        if "profiles" in config:
+            for profile in config["profiles"]:
+                profiles[profile] = config[profile]
+                del (config[profile])
+
+        # If profiles are empty, copy in the config as a default.
+        if not profiles:
+            profiles[""] = config
+
+        self.profiles = profiles
+        self.config = config
 
     def setup(self):
         if "setup" in self.config:
@@ -691,6 +705,23 @@ class TestRunner:
         return env
 
     def run(self, outdir):
+        config = self.config.copy()
+        results = {
+            "success": 0,
+            "failure": 0,
+            "skipped": 0,
+        }
+        for profile in self.profiles:
+            profile_config = config.copy()
+            profile_config.update(self.profiles[profile])
+            self.config = profile_config
+            self.profile = profile
+            result = self._run(outdir)
+            for key in results:
+                results[key] += result[key]
+        return results
+
+    def _run(self, outdir):
         if not self.force:
             self.check_requires()
             self.check_skip()
@@ -801,7 +832,11 @@ class TestRunner:
                         path_name = os.path.join(os.path.basename(os.path.dirname(self.directory)), self.name)
                     else:
                         path_name = (os.path.basename(self.directory))
-                    print("===> %s: OK%s" % (path_name, " (%dx)" % count if count > 1 else ""))
+                    if self.profile:
+                        profile = "({})".format(self.profile)
+                    else:
+                        profile = ""
+                    print("===> %s%s: OK%s" % (path_name, profile, " (%dx)" % count if count > 1 else ""))
             elif not check_value["failure"]:
                 if not self.quiet:
                     print("===> {}: OK (checks: {}, skipped: {})".format(os.path.basename(self.directory), sum(check_value.values()), check_value["skipped"]))
@@ -852,8 +887,9 @@ class TestRunner:
                     for key in check:
                         if key in ["filter", "shell", "stats", "file-compare"]:
                             func = getattr(self, "perform_{}_checks".format(key.replace("-","_")))
+                            test_name = os.path.basename(self.directory) + "({})".format(self.profile)
                             count = func(check=check[key], count=count,
-                                    test_num=check_count + 1, test_name=os.path.basename(self.directory))
+                                    test_num=check_count + 1, test_name=test_name)
                         else:
                             print("FAIL: Unknown check type: {}".format(key))
         finally:
