@@ -18,4 +18,4 @@ checks:
         src_ip: "10.16.1.11"
         dest_ip: "8.8.4.4"
         event_type: dns
-        dns.type: answer
+        dns.type: response

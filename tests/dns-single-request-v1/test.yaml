@@ -8,9 +8,9 @@ checks:
       count: 1
       match:
         dns.type: query
-        dns.rrname: suricon.net
+        dns.queries[0].rrname: suricon.net
   - filter:
       count: 1
       match:
-        dns.type: answer
+        dns.type: response
         dns.rdata: "181.224.138.142"

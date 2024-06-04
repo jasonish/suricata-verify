@@ -10,7 +10,7 @@ checks:
   - filter:
       count: 2
       match:
-        dns.rrtype: AAAA
+        dns.queries[0].rrtype: AAAA
   - filter:
       count: 2
       match:

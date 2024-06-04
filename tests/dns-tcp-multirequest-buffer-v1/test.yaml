@@ -13,4 +13,4 @@ checks:
   - filter:
       count: 40
       match:
-        dns.type: answer
+        dns.type: response

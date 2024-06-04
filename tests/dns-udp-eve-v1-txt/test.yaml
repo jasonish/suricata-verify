@@ -14,8 +14,8 @@ checks:
       dest_ip: 10.16.1.1
       dest_port: 53
       dns.id: 28243
-      dns.rrname: google.com
-      dns.rrtype: TXT
+      dns.queries[0].rrname: google.com
+      dns.queries[0].rrtype: TXT
       dns.tx_id: 0
       dns.type: query
       event_type: dns
@@ -29,8 +29,8 @@ checks:
       dest_ip: 10.16.1.1
       dest_port: 53
       dns.id: 39372
-      dns.rrname: textsecure-service-ca.whispersystems.org
-      dns.rrtype: A
+      dns.queries[0].rrname: textsecure-service-ca.whispersystems.org
+      dns.queries[0].rrtype: A
       dns.tx_id: 0
       dns.type: query
       event_type: dns
@@ -50,10 +50,10 @@ checks:
       dns.rcode: NOERROR
       dns.rd: true
       dns.rdata: v=spf1 include:_spf.google.com ~all
-      dns.rrname: google.com
-      dns.rrtype: TXT
+      dns.queries[0].rrname: google.com
+      dns.queries[0].rrtype: TXT
       dns.ttl: 3217
-      dns.type: answer
+      dns.type: response
       event_type: dns
       pcap_cnt: 2
       proto: UDP
@@ -71,10 +71,10 @@ checks:
       dns.rcode: NOERROR
       dns.rd: true
       dns.rdata: 34.197.178.240
-      dns.rrname: textsecure-service-ca.whispersystems.org
-      dns.rrtype: A
+      dns.queries[0].rrname: textsecure-service-ca.whispersystems.org
+      dns.queries[0].rrtype: A
       dns.ttl: 5
-      dns.type: answer
+      dns.type: response
       event_type: dns
       pcap_cnt: 4
       proto: UDP

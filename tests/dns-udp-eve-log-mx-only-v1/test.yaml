@@ -9,7 +9,7 @@ checks:
   - filter:
       count: 6
       match:
-        dns.rrtype: MX 
+        dns.queries[0].rrtype: MX 
   - filter:
       count: 6
       match:

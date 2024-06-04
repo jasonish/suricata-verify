@@ -14,8 +14,8 @@ checks:
       dest_ip: 10.16.1.1
       dest_port: 53
       dns.id: 36146
-      dns.rrname: www.suricata-ids.org
-      dns.rrtype: A
+      dns.queries[0].rrname: www.suricata-ids.org
+      dns.queries[0].rrtype: A
       dns.tx_id: 0
       dns.type: query
       event_type: dns
@@ -35,10 +35,10 @@ checks:
       dns.rcode: NOERROR
       dns.rd: true
       dns.rdata: suricata-ids.org
-      dns.rrname: www.suricata-ids.org
-      dns.rrtype: CNAME
+      dns.queries[0].rrname: www.suricata-ids.org
+      dns.queries[0].rrtype: CNAME
       dns.ttl: 3544
-      dns.type: answer
+      dns.type: response
       event_type: dns
       pcap_cnt: 2
       proto: UDP
@@ -56,10 +56,10 @@ checks:
       dns.rcode: NOERROR
       dns.rd: true
       dns.rdata: 192.0.78.24
-      dns.rrname: suricata-ids.org
-      dns.rrtype: A
+      dns.queries[0].rrname: suricata-ids.org
+      dns.queries[0].rrtype: A
       dns.ttl: 244
-      dns.type: answer
+      dns.type: response
       event_type: dns
       pcap_cnt: 2
       proto: UDP
@@ -77,10 +77,10 @@ checks:
       dns.rcode: NOERROR
       dns.rd: true
       dns.rdata: 192.0.78.25
-      dns.rrname: suricata-ids.org
-      dns.rrtype: A
+      dns.queries[0].rrname: suricata-ids.org
+      dns.queries[0].rrtype: A
       dns.ttl: 244
-      dns.type: answer
+      dns.type: response
       event_type: dns
       pcap_cnt: 2
       proto: UDP

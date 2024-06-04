@@ -13,4 +13,4 @@ checks:
       count: 2
       match:
         event_type: dns
-        dns.type: answer
+        dns.type: response
