@@ -1,0 +1,13 @@
+pcap: ../../dns-udp-unsolicited-response-v1/dns-response-2x.pcap
+
+checks:
+  - filter:
+      count: 1
+      match:
+        event_type: dns
+        dns.type: query
+  - filter:
+      count: 2
+      match:
+        event_type: dns
+        dns.type: answer

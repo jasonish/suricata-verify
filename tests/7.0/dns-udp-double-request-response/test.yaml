@@ -1,0 +1,17 @@
+pcap: ../../dns-udp-double-request-response-v1/dns-udp-double-request-response.pcap
+
+requires:
+  features:
+    - HAVE_LIBJANSSON
+
+checks:
+  - filter:
+      count: 2
+      match:
+        event_type: dns
+        dns.type: query
+  - filter:
+      count: 2
+      match:
+        event_type: dns
+        dns.type: answer

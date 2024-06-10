@@ -1,0 +1,15 @@
+pcap: ../../dns-single-request-v1/input.pcap
+
+requires:
+  features:
+    - HAVE_LIBJANSSON
+
+checks:
+  - filter:
+      count: 1
+      match:
+        dns.type: query
+  - filter:
+      count: 1
+      match:
+        dns.type: answer
