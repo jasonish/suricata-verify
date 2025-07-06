@@ -855,6 +855,7 @@ class TestRunner:
                     for r in self.readers:
                         if interrupted:
                             p.terminate()
+                            p.wait()  # Ensure process fully exits
                             break
                         try:
                             r.join(timeout=PROC_TIMEOUT)
@@ -868,10 +869,12 @@ class TestRunner:
                         except:
                             print("Suricata timed out, terminating")
                             p.terminate()
+                            p.wait()  # Ensure process fully exits
                             raise TestError("timed out when expected exit code %d" % (
                                 expected_exit_code));
                     else:
                         p.terminate()
+                        p.wait()  # Ensure process fully exits
                         raise TerminatePoolError("Interrupted")
 
                     if len(self.utf8_errors) > 0:
@@ -891,11 +894,17 @@ class TestRunner:
                         stderr.close()
                     except:
                         pass
-                    # Ensure subprocess pipes are closed
-                    if 'p' in locals():
+                    # Ensure subprocess pipes and process are fully cleaned up
+                    if 'p' in locals() and p is not None:
                         try:
-                            p.stdout.close()
-                            p.stderr.close()
+                            if p.stdout:
+                                p.stdout.close()
+                            if p.stderr:
+                                p.stderr.close()
+                            # Ensure process is terminated and reaped
+                            if p.poll() is None:
+                                p.terminate()
+                                p.wait()
                         except:
                             pass
 
