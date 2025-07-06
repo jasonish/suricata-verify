@@ -47,11 +47,11 @@ import traceback
 import platform
 
 VALIDATE_EVE = False
-# Windows and macOS don't support the mp logic below.
+# macOS doesn't support the mp logic below.
 WIN32 = sys.platform == "win32"
 DARWIN = sys.platform == "darwin"
-# Threading is only enabled on Linux for now
-MP = platform.system() == "Linux"
+# Threading is enabled on Linux and Windows
+MP = platform.system() in ["Linux", "Windows"]
 # These will be set to absolute paths in main()
 suricata_yaml = None
 suricata_bin = None
