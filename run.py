@@ -815,6 +815,7 @@ class TestRunner:
                     try:
                         shutil.rmtree(self.output)
                     except Exception as e:
+                        print(f"DEBUG: File access error during cleanup: {e}")
                         raise TestError(f"Cannot remove output directory '{self.output}': {e}")
 
                 os.makedirs(self.output)
@@ -1153,10 +1154,18 @@ def run_test(dirpath, args, cwd, suricata_config):
                     except Exception as err:
                         print(f"ERR: Couldn't delete output dir '{outdir}' in aggressive cleanup mode: {err}")
     except UnsatisfiedRequirementError as ue:
-        if not args.quiet:
-            print("===> {}: SKIPPED: {}".format(os.path.basename(dirpath), ue))
-        with lock:
-            count_dict["skipped"] += 1
+        # Check if this is actually a file access error that should be treated as a failure
+        if "cannot access the file" in str(ue).lower() or "being used by another process" in str(ue).lower():
+            print("===> {}: FAILED: {}".format(os.path.basename(dirpath), ue))
+            check_args_fail()
+            with lock:
+                count_dict["failed"] += 1
+                failedLogs.append(dirpath)
+        else:
+            if not args.quiet:
+                print("===> {}: SKIPPED: {}".format(os.path.basename(dirpath), ue))
+            with lock:
+                count_dict["skipped"] += 1
     except TestError as te:
         print("===> {}: FAILED: {}".format(os.path.basename(dirpath), te))
         check_args_fail()
