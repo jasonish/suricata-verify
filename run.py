@@ -51,7 +51,8 @@ VALIDATE_EVE = False
 WIN32 = sys.platform == "win32"
 DARWIN = sys.platform == "darwin"
 # Threading is enabled on Linux and Windows
-MP = platform.system() in ["Linux", "Windows"]
+#MP = platform.system() in ["Linux", "Windows"]
+MP = True
 # These will be set to absolute paths in main()
 suricata_yaml = None
 suricata_bin = None
