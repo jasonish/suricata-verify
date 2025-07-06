@@ -812,7 +812,11 @@ class TestRunner:
 
                 # Cleanup the output directory.
                 if os.path.exists(self.output):
-                    shutil.rmtree(self.output)
+                    try:
+                        shutil.rmtree(self.output)
+                    except Exception as e:
+                        raise TestError(f"Cannot remove output directory '{self.output}': {e}")
+
                 os.makedirs(self.output)
                 self.setup()
 
@@ -827,50 +831,73 @@ class TestRunner:
                         args[a] = string.Template(args[a]).substitute(safe_env)
                     cmdline = " ".join(args) + "\n"
 
-                open(os.path.join(self.output, "cmdline"), "w").write(cmdline)
+                try:
+                    with open(os.path.join(self.output, "cmdline"), "w") as f:
+                        f.write(cmdline)
+                except Exception as e:
+                    print(f"WARNING: Cannot write cmdline file: {e}")
 
                 if self.verbose:
                     print("Executing: {}".format(cmdline.strip()))
 
-                p = subprocess.Popen(
-                    args, shell=shell, cwd=self.directory, env=env,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    p = subprocess.Popen(
+                        args, shell=shell, cwd=self.directory, env=env,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                # used to get a return value from the threads
-                self.utf8_errors=[]
-                self.start_reader(p.stdout, stdout)
-                self.start_reader(p.stderr, stderr)
-                
-                # Check for interrupts while waiting for readers
-                global interrupted
-                for r in self.readers:
-                    if interrupted:
+                    # used to get a return value from the threads
+                    self.utf8_errors=[]
+                    self.start_reader(p.stdout, stdout)
+                    self.start_reader(p.stderr, stderr)
+
+                    # Check for interrupts while waiting for readers
+                    global interrupted
+                    for r in self.readers:
+                        if interrupted:
+                            p.terminate()
+                            break
+                        try:
+                            r.join(timeout=PROC_TIMEOUT)
+                        except:
+                            print("stdout/stderr reader timed out, terminating")
+                            r.terminate()
+
+                    if not interrupted:
+                        try:
+                            r = p.wait(timeout=PROC_TIMEOUT)
+                        except:
+                            print("Suricata timed out, terminating")
+                            p.terminate()
+                            raise TestError("timed out when expected exit code %d" % (
+                                expected_exit_code));
+                    else:
                         p.terminate()
-                        break
+                        raise TerminatePoolError("Interrupted")
+
+                    if len(self.utf8_errors) > 0:
+                         raise TestError("got utf8 decode errors %s" % self.utf8_errors);
+
+                    if r != expected_exit_code:
+                        raise TestError("got exit code %d, expected %d" % (
+                            r, expected_exit_code));
+
+                finally:
+                    # Always close file handles
                     try:
-                        r.join(timeout=PROC_TIMEOUT)
+                        stdout.close()
                     except:
-                        print("stdout/stderr reader timed out, terminating")
-                        r.terminate()
-
-                if not interrupted:
+                        pass
                     try:
-                        r = p.wait(timeout=PROC_TIMEOUT)
+                        stderr.close()
                     except:
-                        print("Suricata timed out, terminating")
-                        p.terminate()
-                        raise TestError("timed out when expected exit code %d" % (
-                            expected_exit_code));
-                else:
-                    p.terminate()
-                    raise TerminatePoolError("Interrupted")
-
-                if len(self.utf8_errors) > 0:
-                     raise TestError("got utf8 decode errors %s" % self.utf8_errors);
-
-                if r != expected_exit_code:
-                    raise TestError("got exit code %d, expected %d" % (
-                        r, expected_exit_code));
+                        pass
+                    # Ensure subprocess pipes are closed
+                    if 'p' in locals():
+                        try:
+                            p.stdout.close()
+                            p.stderr.close()
+                        except:
+                            pass
 
                 check_value = self.check()
 
@@ -1115,8 +1142,7 @@ def run_test(dirpath, args, cwd, suricata_config):
                     try:
                         shutil.rmtree(outdir)
                     except Exception as err:
-                        print("ERR: Couldn't delete output dir in aggressive cleanup mode")
-                        traceback.print_exc()
+                        print(f"ERR: Couldn't delete output dir '{outdir}' in aggressive cleanup mode: {err}")
     except UnsatisfiedRequirementError as ue:
         if not args.quiet:
             print("===> {}: SKIPPED: {}".format(os.path.basename(dirpath), ue))
