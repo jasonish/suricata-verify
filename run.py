@@ -173,29 +173,7 @@ def pipe_reader(fileobj, output=None, verbose=False, utf8_errors=[]):
             print(line)
 
 
-def handle_exceptions(func):
-    def applicator(*args, **kwargs):
-        result = False
-        try:
-            result = func(*args,**kwargs)
-        except TestError as te:
-            print("===> {}: Sub test #{}: FAIL : {}".format(kwargs["test_name"], kwargs["test_num"], te))
-            check_args_fail()
-            kwargs["count"]["failure"] += 1
-        except UnsatisfiedRequirementError as ue:
-            if args and not args[0].quiet:
-                print("===> {}: Sub test #{}: SKIPPED : {}".format(kwargs["test_name"], kwargs["test_num"], ue))
-            kwargs["count"]["skipped"] += 1
-        except Exception as err:
-            raise TestError("Internal runtime error: {}".format(err))
-        else:
-            if result:
-              kwargs["count"]["success"] += 1
-            else:
-              print("\n===> {}: Sub test #{}: FAIL : {}".format(kwargs["test_name"], kwargs["test_num"], kwargs["check"]["args"]))
-              kwargs["count"]["failure"] += 1
-        return kwargs["count"]
-    return applicator
+
 
 
 class Version:
@@ -857,23 +835,19 @@ class TestRunner:
         if "pre-check" in self.config:
             subprocess.call(self.config["pre-check"], shell=True, cwd=self.output)
 
-    @handle_exceptions
     def perform_filter_checks(self, check, count, test_num, test_name):
         count = FilterCheck(check, self.output,
                 self.suricata_config, self.version).run()
         return count
 
-    @handle_exceptions
     def perform_shell_checks(self, check, count, test_num, test_name):
         count = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output).run()
         return count
 
-    @handle_exceptions
     def perform_stats_checks(self, check, count, test_num, test_name):
         count = StatsCheck(check, self.output).run()
         return count
 
-    @handle_exceptions
     def perform_file_compare_checks(self, check, count, test_num, test_name):
         count = FileCompareCheck(check, self.directory, self.output).run()
         return count
