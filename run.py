@@ -45,6 +45,7 @@ import subprocess
 import yaml
 import traceback
 import platform
+import signal
 
 VALIDATE_EVE = False
 # macOS doesn't support the mp logic below.
@@ -68,6 +69,35 @@ count_dict['passed'] = 0
 count_dict['failed'] = 0
 count_dict['skipped'] = 0
 check_args['fail'] = 0
+
+# Global flag to signal interrupt
+interrupted = False
+
+def signal_handler(signum, frame):
+    """Handle CTRL-C gracefully across platforms"""
+    global interrupted
+    interrupted = True
+    print("\nInterrupt received, stopping tests...")
+    with lock:
+        check_args['fail'] = 1
+    # Force exit after a grace period
+    if threading.active_count() > 1:
+        threading.Timer(5.0, lambda: os._exit(1)).start()
+
+# Windows-specific CTRL-C handler
+if WIN32:
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+
+    def win32_ctrl_handler(ctrl_type):
+        """Windows console control handler"""
+        if ctrl_type in (0, 1):  # CTRL_C_EVENT or CTRL_BREAK_EVENT
+            signal_handler(None, None)
+            return True
+        return False
+
+    # Convert Python function to Windows handler
+    HandlerRoutine = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)(win32_ctrl_handler)
 
 class SelfTest(unittest.TestCase):
 
@@ -810,20 +840,30 @@ class TestRunner:
                 self.utf8_errors=[]
                 self.start_reader(p.stdout, stdout)
                 self.start_reader(p.stderr, stderr)
+                
+                # Check for interrupts while waiting for readers
+                global interrupted
                 for r in self.readers:
+                    if interrupted:
+                        p.terminate()
+                        break
                     try:
                         r.join(timeout=PROC_TIMEOUT)
                     except:
                         print("stdout/stderr reader timed out, terminating")
                         r.terminate()
 
-                try:
-                    r = p.wait(timeout=PROC_TIMEOUT)
-                except:
-                    print("Suricata timed out, terminating")
+                if not interrupted:
+                    try:
+                        r = p.wait(timeout=PROC_TIMEOUT)
+                    except:
+                        print("Suricata timed out, terminating")
+                        p.terminate()
+                        raise TestError("timed out when expected exit code %d" % (
+                            expected_exit_code));
+                else:
                     p.terminate()
-                    raise TestError("timed out when expected exit code %d" % (
-                        expected_exit_code));
+                    raise TerminatePoolError("Interrupted")
 
                 if len(self.utf8_errors) > 0:
                      raise TestError("got utf8 decode errors %s" % self.utf8_errors);
@@ -1045,8 +1085,9 @@ def check_deps():
     return True
 
 def run_test(dirpath, args, cwd, suricata_config):
+    global interrupted
     with lock:
-        if check_args['fail'] == 1:
+        if check_args['fail'] == 1 or interrupted:
             raise TerminatePoolError()
 
     name = os.path.basename(dirpath)
@@ -1099,16 +1140,21 @@ def run_test(dirpath, args, cwd, suricata_config):
             raise TerminatePoolError()
 
 def run_mp(jobs, tests, dirpath, args, cwd, suricata_config):
+    global interrupted
     print("Number of concurrent jobs: %d" % jobs)
     with ThreadPoolExecutor(max_workers=jobs) as executor:
         futures = []
         try:
             for dirpath in tests:
+                if interrupted:
+                    break
                 future = executor.submit(run_test, dirpath, args, cwd, suricata_config)
                 futures.append(future)
 
             # Wait for all tasks to complete or until TerminatePoolError
             for future in as_completed(futures):
+                if interrupted:
+                    break
                 try:
                     future.result()
                 except TerminatePoolError:
@@ -1116,15 +1162,18 @@ def run_mp(jobs, tests, dirpath, args, cwd, suricata_config):
                     for f in futures:
                         f.cancel()
                     raise
-        except TerminatePoolError:
+        except (TerminatePoolError, KeyboardInterrupt):
             executor.shutdown(wait=False)
             sys.exit(1)
 
 def run_single(tests, dirpath, args, cwd, suricata_config):
+    global interrupted
     try:
         for dirpath in tests:
+            if interrupted:
+                break
             run_test(dirpath, args, cwd, suricata_config)
-    except TerminatePoolError:
+    except (TerminatePoolError, KeyboardInterrupt):
         sys.exit(1)
 
 def build_eve_validator():
@@ -1138,6 +1187,16 @@ def build_eve_validator():
 def main():
     global TOPDIR
     global args
+
+    # Register signal handlers for cross-platform CTRL-C support
+    if WIN32:
+        # Windows console control handler
+        kernel32.SetConsoleCtrlHandler(HandlerRoutine, True)
+    else:
+        # Unix-like signal handlers
+        signal.signal(signal.SIGINT, signal_handler)
+        if hasattr(signal, 'SIGTERM'):
+            signal.signal(signal.SIGTERM, signal_handler)
 
     if not check_deps():
         return 1
