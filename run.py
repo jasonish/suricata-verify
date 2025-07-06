@@ -37,9 +37,9 @@ import glob
 import re
 import json
 import unittest
-import multiprocessing as mp
 from collections import namedtuple
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import filecmp
 import subprocess
 import yaml
@@ -50,30 +50,19 @@ VALIDATE_EVE = False
 # Windows and macOS don't support the mp logic below.
 WIN32 = sys.platform == "win32"
 DARWIN = sys.platform == "darwin"
-MP = not WIN32 and not DARWIN
-suricata_yaml = "suricata.yaml" if WIN32 else "./suricata.yaml"
-
-# Determine the Suricata binary
-if os.path.exists("src\\suricata.exe"):
-    suricata_bin = "src\\suricata.exe"
-else:
-    suricata_bin = "./src/suricata"
+# Threading is only enabled on Linux for now
+MP = platform.system() == "Linux"
+# These will be set to absolute paths in main()
+suricata_yaml = None
+suricata_bin = None
 
 PROC_TIMEOUT=300
 
-if MP:
-    manager = mp.Manager()
-    lock = mp.Lock()
-    failedLogs = manager.list()
-    count_dict = manager.dict()
-    check_args = manager.dict()
-else:
-    failedLogs = []
-    count_dict = {}
-    check_args = {}
-    # Bring in a lock from threading to satisfy the MP semantics when
-    # not using MP.
-    lock = threading.Lock()
+# Use threading lock for all platforms
+lock = threading.Lock()
+failedLogs = []
+count_dict = {}
+check_args = {}
 
 count_dict['passed'] = 0
 count_dict['failed'] = 0
@@ -165,6 +154,8 @@ def parse_suricata_version(buf, expr=None):
     return None
 
 def get_suricata_version():
+    if not suricata_bin:
+        raise RuntimeError("suricata_bin not initialized")
     output = subprocess.check_output([suricata_bin, "-V"])
     return parse_suricata_version(output)
 
@@ -289,6 +280,8 @@ class SuricataConfig:
         self.load_build_info()
 
     def load_build_info(self):
+        if not suricata_bin:
+            raise RuntimeError("suricata_bin not initialized")
         output = subprocess.check_output([suricata_bin, "--build-info"])
         start_support = False
         for line in output.splitlines():
@@ -304,6 +297,8 @@ class SuricataConfig:
                     self.features.add(fkey)
 
     def load_config(self, config_filename):
+        if not suricata_bin:
+            raise RuntimeError("suricata_bin not initialized")
         output = subprocess.check_output([
             suricata_bin,
             "-c", config_filename,
@@ -463,15 +458,16 @@ def rule_is_version_compatible(rulefile, suri_version):
 
 class FileCompareCheck:
 
-    def __init__(self, config, directory):
+    def __init__(self, config, directory, outdir):
         self.config = config
         self.directory = directory
+        self.outdir = outdir
 
     def run(self):
         if WIN32:
             raise UnsatisfiedRequirementError("shell check not supported on Windows")
         expected = os.path.join(self.directory, self.config["expected"])
-        filename = self.config["filename"]
+        filename = os.path.join(self.outdir, self.config["filename"])
         try:
             if filecmp.cmp(expected, filename):
                 return True
@@ -482,10 +478,11 @@ class FileCompareCheck:
 
 class ShellCheck:
 
-    def __init__(self, config, env, suricata_config):
+    def __init__(self, config, env, suricata_config, cwd=None):
         self.config = config
         self.env = env
         self.suricata_config = suricata_config
+        self.cwd = cwd
 
     def run(self):
         shell_args = {}
@@ -505,7 +502,7 @@ class ShellCheck:
         try:
             if WIN32:
                 raise UnsatisfiedRequirementError("shell check not supported on Windows")
-            output = subprocess.check_output(self.config["args"], shell=True, env=self.env)
+            output = subprocess.check_output(self.config["args"], shell=True, env=self.env, cwd=self.cwd)
             if "expect" in self.config:
                 return str(self.config["expect"]) == output.decode().strip()
             return True
@@ -521,7 +518,8 @@ class StatsCheck:
 
     def run(self):
         stats = None
-        with open("eve.json", "r") as fileobj:
+        eve_path = os.path.join(self.outdir, "eve.json")
+        with open(eve_path, "r") as fileobj:
             for line in fileobj:
                 event = json.loads(line)
                 if event["event_type"] == "stats":
@@ -560,9 +558,9 @@ class FilterCheck:
         check_requires(requires, self.suricata_config)
 
         if "filename" in self.config:
-            json_filename = self.config["filename"]
+            json_filename = os.path.join(self.outdir, self.config["filename"])
         else:
-            json_filename = "eve.json"
+            json_filename = os.path.join(self.outdir, "eve.json")
         if not os.path.exists(json_filename):
             raise TestError("%s does not exist" % (json_filename))
 
@@ -857,7 +855,7 @@ class TestRunner:
 
     def pre_check(self):
         if "pre-check" in self.config:
-            subprocess.call(self.config["pre-check"], shell=True)
+            subprocess.call(self.config["pre-check"], shell=True, cwd=self.output)
 
     @handle_exceptions
     def perform_filter_checks(self, check, count, test_num, test_name):
@@ -867,7 +865,7 @@ class TestRunner:
 
     @handle_exceptions
     def perform_shell_checks(self, check, count, test_num, test_name):
-        count = ShellCheck(check, self.build_env(), self.suricata_config).run()
+        count = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output).run()
         return count
 
     @handle_exceptions
@@ -877,7 +875,7 @@ class TestRunner:
 
     @handle_exceptions
     def perform_file_compare_checks(self, check, count, test_num, test_name):
-        count = FileCompareCheck(check, self.directory).run()
+        count = FileCompareCheck(check, self.directory, self.output).run()
         return count
 
     def reset_count(self, dictionary):
@@ -885,27 +883,23 @@ class TestRunner:
             dictionary[k] = 0
 
     def check(self):
-        pdir = os.getcwd()
-        os.chdir(self.output)
+        # Store original directory but don't change it for thread safety
         count = {
             "success": 0,
             "failure": 0,
             "skipped": 0,
                 }
-        try:
-            self.pre_check()
-            if "checks" in self.config:
-                self.reset_count(count)
-                for check_count, check in enumerate(self.config["checks"]):
-                    for key in check:
-                        if key in ["filter", "shell", "stats", "file-compare"]:
-                            func = getattr(self, "perform_{}_checks".format(key.replace("-","_")))
-                            count = func(check=check[key], count=count,
-                                    test_num=check_count + 1, test_name=os.path.basename(self.directory))
-                        else:
-                            print("FAIL: Unknown check type: {}".format(key))
-        finally:
-            os.chdir(pdir)
+        self.pre_check()
+        if "checks" in self.config:
+            self.reset_count(count)
+            for check_count, check in enumerate(self.config["checks"]):
+                for key in check:
+                    if key in ["filter", "shell", "stats", "file-compare"]:
+                        func = getattr(self, "perform_{}_checks".format(key.replace("-","_")))
+                        count = func(check=check[key], count=count,
+                                test_num=check_count + 1, test_name=os.path.basename(self.directory))
+                    else:
+                        print("FAIL: Unknown check type: {}".format(key))
 
         if count["failure"] or count["skipped"]:
             return count
@@ -968,14 +962,10 @@ class TestRunner:
 
         # Find pcaps.
         if "pcap" in self.config:
-            try:
-                curdir = os.getcwd()
-                os.chdir(self.directory)
-                if not os.path.exists(self.config["pcap"]):
-                    raise TestError("PCAP filename does not exist: {}".format(self.config["pcap"]))
-                args += ["-r", os.path.realpath(os.path.join(self.directory, self.config["pcap"]))]
-            finally:
-                os.chdir(curdir)
+            pcap_path = os.path.join(self.directory, self.config["pcap"])
+            if not os.path.exists(pcap_path):
+                raise TestError("PCAP filename does not exist: {}".format(self.config["pcap"]))
+            args += ["-r", os.path.realpath(pcap_path)]
         else:
             pcaps = glob.glob(os.path.join(self.directory, "*.pcap"))
             pcaps += glob.glob(os.path.join(self.directory, "*.pcapng"))
@@ -1108,14 +1098,25 @@ def run_test(dirpath, args, cwd, suricata_config):
 
 def run_mp(jobs, tests, dirpath, args, cwd, suricata_config):
     print("Number of concurrent jobs: %d" % jobs)
-    pool = mp.Pool(jobs)
-    try:
-        for dirpath in tests:
-            pool.apply_async(run_test, args=(dirpath, args, cwd, suricata_config))
-    except TerminatePoolError:
-        pool.terminate()
-    pool.close()
-    pool.join()
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = []
+        try:
+            for dirpath in tests:
+                future = executor.submit(run_test, dirpath, args, cwd, suricata_config)
+                futures.append(future)
+
+            # Wait for all tasks to complete or until TerminatePoolError
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except TerminatePoolError:
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    raise
+        except TerminatePoolError:
+            executor.shutdown(wait=False)
+            sys.exit(1)
 
 def run_single(tests, dirpath, args, cwd, suricata_config):
     try:
@@ -1166,7 +1167,7 @@ def main():
     parser.add_argument("--no-validation", action="store_true", help="Disable EVE validation")
     parser.add_argument("patterns", nargs="*", default=[])
     if MP:
-        parser.add_argument("-j", type=int, default=min(8, mp.cpu_count()),
+        parser.add_argument("-j", type=int, default=min(8, os.cpu_count()),
                         help="Number of jobs to run")
     args = parser.parse_args()
 
@@ -1178,6 +1179,17 @@ def main():
     # Get the current working directory, which should be the top
     # suricata source directory.
     cwd = os.getcwd()
+
+    # Set up the paths as absolute paths
+    global suricata_yaml, suricata_bin
+    suricata_yaml = os.path.join(cwd, "suricata.yaml" if WIN32 else "suricata.yaml")
+
+    # Determine the Suricata binary
+    if WIN32 and os.path.exists(os.path.join(cwd, "src", "suricata.exe")):
+        suricata_bin = os.path.join(cwd, "src", "suricata.exe")
+    else:
+        suricata_bin = os.path.join(cwd, "src", "suricata")
+
     if not (os.path.exists(suricata_yaml) and
             os.path.exists(suricata_bin)):
         print("error: this is not a suricata source directory or " +
