@@ -488,14 +488,16 @@ def rule_is_version_compatible(rulefile, suri_version):
 
 class FileCompareCheck:
 
-    def __init__(self, config, directory, outdir):
+    def __init__(self, config, directory, outdir, quiet=False):
         self.config = config
         self.directory = directory
         self.outdir = outdir
+        self.quiet = quiet
 
     def run(self):
         if WIN32:
-            print("skipping shell check on windows")
+            if not self.quiet:
+                print("skipping shell check on windows")
             return True;
         expected = os.path.join(self.directory, self.config["expected"])
         filename = os.path.join(self.outdir, self.config["filename"])
@@ -509,11 +511,12 @@ class FileCompareCheck:
 
 class ShellCheck:
 
-    def __init__(self, config, env, suricata_config, cwd=None):
+    def __init__(self, config, env, suricata_config, cwd=None, quiet=False):
         self.config = config
         self.env = env
         self.suricata_config = suricata_config
         self.cwd = cwd
+        self.quiet = quiet
 
     def run(self):
         shell_args = {}
@@ -532,7 +535,8 @@ class ShellCheck:
 
         try:
             if WIN32:
-                print("skipping shell check on windows")
+                if not self.quiet:
+                    print("skipping shell check on windows")
                 return True;
             output = subprocess.check_output(self.config["args"], shell=True, env=self.env, cwd=self.cwd)
             if "expect" in self.config:
@@ -944,7 +948,7 @@ class TestRunner:
 
     @handle_exceptions
     def perform_shell_checks(self, check, count, test_num, test_name):
-        count = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output).run()
+        count = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output, quiet=self.quiet).run()
         return count
 
     @handle_exceptions
@@ -954,7 +958,7 @@ class TestRunner:
 
     @handle_exceptions
     def perform_file_compare_checks(self, check, count, test_num, test_name):
-        count = FileCompareCheck(check, self.directory, self.output).run()
+        count = FileCompareCheck(check, self.directory, self.output, quiet=self.quiet).run()
         return count
 
     def reset_count(self, dictionary):
