@@ -836,20 +836,56 @@ class TestRunner:
             subprocess.call(self.config["pre-check"], shell=True, cwd=self.output)
 
     def perform_filter_checks(self, check, count, test_num, test_name):
-        count = FilterCheck(check, self.output,
-                self.suricata_config, self.version).run()
+        try:
+            success = FilterCheck(check, self.output,
+                    self.suricata_config, self.version).run()
+            if success:
+                count["success"] += 1
+            else:
+                count["failure"] += 1
+        except UnsatisfiedRequirementError:
+            count["skipped"] += 1
+        except TestError:
+            count["failure"] += 1
         return count
 
     def perform_shell_checks(self, check, count, test_num, test_name):
-        count = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output).run()
+        try:
+            success = ShellCheck(check, self.build_env(), self.suricata_config, cwd=self.output).run()
+            if success:
+                count["success"] += 1
+            else:
+                count["failure"] += 1
+        except UnsatisfiedRequirementError:
+            count["skipped"] += 1
+        except TestError:
+            count["failure"] += 1
         return count
 
     def perform_stats_checks(self, check, count, test_num, test_name):
-        count = StatsCheck(check, self.output).run()
+        try:
+            success = StatsCheck(check, self.output).run()
+            if success:
+                count["success"] += 1
+            else:
+                count["failure"] += 1
+        except UnsatisfiedRequirementError:
+            count["skipped"] += 1
+        except TestError:
+            count["failure"] += 1
         return count
 
     def perform_file_compare_checks(self, check, count, test_num, test_name):
-        count = FileCompareCheck(check, self.directory, self.output).run()
+        try:
+            success = FileCompareCheck(check, self.directory, self.output).run()
+            if success:
+                count["success"] += 1
+            else:
+                count["failure"] += 1
+        except UnsatisfiedRequirementError:
+            count["skipped"] += 1
+        except TestError:
+            count["failure"] += 1
         return count
 
     def reset_count(self, dictionary):
