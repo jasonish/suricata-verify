@@ -1,9 +1,14 @@
 # This test will run in NFQ, AF-PACKET and IDS modes.
 mode: [nfq, afp, ids]
 
+requires:
+  commands:
+    - podman
+
 server: |
   id=$(podman build -q --network=host server)
   podman run --rm \
+    --stop-timeout=0 \
     --network ns:/var/run/netns/server \
     ${id}
 

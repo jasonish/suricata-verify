@@ -1,5 +1,10 @@
 mode: [afp]
 
+requires:
+  commands:
+    - jq
+    - podman
+
 before: |
   cp ${TESTDIR}/firewall1.rules ${OUTDIR}/firewall.rules
 
@@ -26,21 +31,21 @@ client: |
 
   # Curl request should not succeed.
   echo "Running curl..."
-  if run timeout --kill-after=30 --preserve-status 15 curl -O http://10.200.0.1/index.html; then
+  if run timeout --kill-after=1 --preserve-status 2 curl -O http://10.200.0.1/index.html; then
     echo "error: curl should not have completed successfully"
     errors="yes"
   fi
 
   # Wget request should succeed.
   echo "Running wget..."
-  if ! run timeout --kill-after=30 --preserve-status 15 wget http://10.200.0.1/index.html; then
+  if ! run timeout --kill-after=1 --preserve-status 2 wget http://10.200.0.1/index.html; then
     echo "error: wget should have completed successfully"
     errors="yes"
   fi
 
   # Ping should not succeed.
   echo "Running ping..."
-  if run ping -c 10 10.200.0.1; then
+  if run ping -c 10 -i 0.05 -W 1 10.200.0.1; then
     echo "error: ping should have failed"
     errors="yes"
   fi
@@ -48,11 +53,11 @@ client: |
   cp ${TESTDIR}/firewall2.rules ${OUTDIR}/firewall.rules
   ${SURICATASC} -c reload-rules ${OUTDIR}/suricata.socket
 
-  # Give stats some time to get updated. Is this needed?
-  sleep 10
+  # Give the rule reload a brief moment to settle.
+  sleep 1
 
   # Wget request should succeed.
-  if ! run timeout --kill-after=30 --preserve-status 15 wget http://10.200.0.1/index.html; then
+  if ! run timeout --kill-after=1 --preserve-status 2 wget http://10.200.0.1/index.html; then
     echo "error: wget should have completed successfully"
     errors="yes"
   fi

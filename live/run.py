@@ -3,6 +3,7 @@
 # Script to prepare live IPS namespace labs for Suricata testing.
 
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -63,6 +64,50 @@ MODE_LABELS = {
 
 verbose = False
 suricata_config_cache = {}
+
+RUNNER_LOCK_PATH = "/tmp/suricata-verify-live.lock"
+
+
+class RunnerLock:
+    """Non-blocking process lock for the shared live-test namespaces."""
+
+    def __init__(self, path: str = RUNNER_LOCK_PATH) -> None:
+        self.path = path
+        self.file = None
+
+    def __enter__(self):
+        self.file = open(self.path, "a+", encoding="utf-8")
+        try:
+            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.file.seek(0)
+            holder = self.file.read().strip()
+            print(
+                "ERROR: another live test runner is already active",
+                file=sys.stderr,
+            )
+            print(f"Lock file: {self.path}", file=sys.stderr)
+            if holder:
+                print(holder, file=sys.stderr)
+            self.file.close()
+            sys.exit(1)
+
+        self.file.seek(0)
+        self.file.truncate()
+        self.file.write(f"pid: {os.getpid()}\n")
+        self.file.write(f"cwd: {os.getcwd()}\n")
+        self.file.write(f"cmd: {shlex.join(sys.argv)}\n")
+        self.file.flush()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self.file is None:
+            return
+        self.file.seek(0)
+        self.file.truncate()
+        fcntl.flock(self.file, fcntl.LOCK_UN)
+        self.file.close()
+        self.file = None
 
 
 def configure_script_env() -> None:
@@ -895,8 +940,26 @@ class ServerScript:
 
     def stop(self, timeout: float = 10) -> int:
         """Stop the script, join threads, close logs, and clean up the temp file."""
-        terminate_process_group(self.proc.pid, timeout=timeout)
-        self.proc.wait()
+        try:
+            os.killpg(self.proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        else:
+            try:
+                self.proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.proc.wait()
+
+        # Reap the script before polling the process group. Otherwise the
+        # exited script can remain as a zombie and make os.killpg(pgid, 0)
+        # look alive until the timeout expires.
+        if self.proc.returncode is None:
+            self.proc.wait()
+        terminate_process_group(self.proc.pid, timeout=1)
 
         # Ensure the tee threads see EOF/shutdown before we close their log files.
         for pipe in (self.proc.stdout, self.proc.stderr):
@@ -1128,9 +1191,26 @@ def is_version_compatible(
     return func(suri_version, config_version)
 
 
+def check_required_commands(requires: dict) -> None:
+    """Validate host command requirements from a requires mapping."""
+    if not isinstance(requires, dict):
+        raise ValueError("requires must be a mapping")
+    commands = requires.get("commands", [])
+    if commands is None:
+        return
+    if not isinstance(commands, list) or any(
+        not isinstance(command, str) for command in commands
+    ):
+        raise ValueError("requires.commands must be an array of strings")
+    for command in commands:
+        if shutil.which(command) is None:
+            raise UnsatisfiedRequirementError(f"requires command {command}")
+
+
 def check_requires(
     requires: dict, suricata_config: SuricataConfig, test_dir: str | None = None
 ) -> None:
+    check_required_commands(requires)
     suri_version = suricata_config.version
     for key in requires:
         if key == "min-version":
@@ -1157,6 +1237,8 @@ def check_requires(
             for feature in requires["features"]:
                 if not suricata_config.has_feature(feature):
                     raise UnsatisfiedRequirementError(f"requires feature {feature}")
+        elif key == "commands":
+            pass
         elif key == "env":
             for env in requires["env"]:
                 if env not in os.environ:
@@ -1618,6 +1700,23 @@ def run_test(
     return failures
 
 
+def check_test_requires(
+    requires: dict, mode: str, script_dir: str, config: dict, test_dir: str
+) -> None:
+    """Validate test-level requirements before setting up namespaces."""
+    check_required_commands(requires)
+    if not (set(requires) - {"commands"}):
+        return
+
+    output_dir = os.path.join(test_dir, "output", mode)
+    os.makedirs(output_dir, exist_ok=True)
+    test_include = render_test_include(test_dir, output_dir)
+    suricata_config = get_suricata_config(
+        mode, script_dir, config, test_dir, output_dir, test_include
+    )
+    check_requires(requires, suricata_config, test_dir)
+
+
 def do_run(
     *,
     only_mode: str | None = None,
@@ -1663,6 +1762,17 @@ def do_run(
                 all_passed = False
                 continue
 
+            requires = config.get("requires", {}) or {}
+            try:
+                check_test_requires(requires, mode, script_dir, config, root)
+            except UnsatisfiedRequirementError as err:
+                log_test_step(mode, test_name, f"SKIP: {err}")
+                continue
+            except ValueError as err:
+                print(f"ERROR: {test_yaml}: {err}", file=sys.stderr)
+                all_passed = False
+                continue
+
             failures = run_test(test_name, mode, config, script_dir, root)
             warnings = []
             if not failures:
@@ -1702,8 +1812,9 @@ def main() -> None:
         need_root()
         for cmd in ["ip", "ethtool", "sysctl", "kill", "iptables"]:
             need_cmd(cmd)
-        if not do_run(only_mode=args.mode, substring=args.substring, tags=args.tag):
-            sys.exit(1)
+        with RunnerLock():
+            if not do_run(only_mode=args.mode, substring=args.substring, tags=args.tag):
+                sys.exit(1)
         return
 
     mode = args.command
@@ -1722,9 +1833,11 @@ def main() -> None:
         need_cmd(cmd)
 
     if action == "up":
-        UP_FUNCS[mode]()
+        with RunnerLock():
+            UP_FUNCS[mode]()
     elif action == "down":
-        do_down()
+        with RunnerLock():
+            do_down()
     elif action == "status":
         STATUS_FUNCS[mode]()
     elif action == "shell":

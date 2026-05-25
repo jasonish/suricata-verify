@@ -28,3 +28,15 @@ name created are:
   like a HTTP server runs.
 - client: The client namespace. This is where your user controlled
   script runs which could run `curl`, etc.
+
+## Test Requirements
+
+Tests can declare required host commands in `test.yaml`. If any command
+is missing, the test is skipped.
+
+```
+requires:
+  commands:
+    - podman
+    - curl
+```
